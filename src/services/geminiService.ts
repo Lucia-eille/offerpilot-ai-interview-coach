@@ -97,9 +97,11 @@ export async function analyzeAnswer(role: string, question: string, answer: stri
     Answer: ${answer} (Submitted via ${mode})
 
     Analyze the candidate's answer for an interview.
-    Output a JSON object:
+    Output a JSON object with these exact keys:
     {
       "score": number (0-100),
+      "grade": "string (e.g. 卓越匹配, 表现良好, 仍需磨炼)",
+      "summary": "string (a brief high-level diagnostic summary)",
       "matching": "string",
       "structure": "string",
       "completeness": "string",
@@ -110,7 +112,9 @@ export async function analyzeAnswer(role: string, question: string, answer: stri
       "optimizedAnswer": "string (a better version of the answer using STAR framework)",
       "voiceMetrics": { "fluency": number, "stability": number, "confidence": number }
     }
-    Return ONLY the JSON.
+    Rules:
+    - If the answer is submitted via voice, prioritize assessing delivery metrics in "voiceMetrics".
+    - Return ONLY the JSON object.
   `;
 
   try {

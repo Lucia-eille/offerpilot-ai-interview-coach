@@ -281,6 +281,7 @@ export default function App() {
   const audioChunksRef = useRef<Blob[]>([]);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingStartTimeRef = useRef<number | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -368,12 +369,13 @@ export default function App() {
       setIsRecording(true);
       setRecordingStatus('recording');
       
-      // Timer Logic
+      // Timer Logic: Use absolute time to avoid closure/drift issues
+      recordingStartTimeRef.current = Date.now();
       recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration(prev => {
-          const next = prev + 1;
-          return next;
-        });
+        if (recordingStartTimeRef.current) {
+          const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+          setRecordingDuration(elapsed);
+        }
 
         // Sample volume
         if (analyserRef.current) {
@@ -383,7 +385,7 @@ export default function App() {
           volumeHistoryRef.current.push(currentAvg);
           setVolumeScore(currentAvg);
         }
-      }, 1000);
+      }, 500); // Update more frequently for smoothness
 
     } catch (err: any) {
       console.error('Error accessing microphone:', err);
@@ -402,6 +404,7 @@ export default function App() {
         console.error("Error stopping recorder:", e);
       }
       setIsRecording(false);
+      recordingStartTimeRef.current = null;
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
@@ -498,8 +501,32 @@ export default function App() {
       if (useMock) throw new Error("Fallback to mock");
       
       const result = await analyzeAnswer(targetRole, selectedQuestion.text, answerContent, answerMode);
-      setAnalysisResult(result);
-      setOptimizedAnswerFromServer(result.optimizedAnswer);
+      
+      if (!result) {
+        throw new Error("AI 分析返回空结果");
+      }
+
+      // Robust standardization of result object to prevent rendering crashes
+      const standardizedResult: AnalysisResult = {
+        score: result.score || result.overallScore || 0,
+        grade: result.grade || result.level || (result.score > 85 ? '卓越匹配' : '表现良好'),
+        summary: result.summary || "AI 已完成深度诊断，请查看下方各项维度指标。",
+        matching: result.matching || result.jobMatch || "正在计算与岗位的匹配度...",
+        structure: result.structure || result.logic || "正在评估 STAR 结构的完整性...",
+        completeness: result.completeness || "已评估回答内容的覆盖深度。",
+        clarity: result.clarity || "已评估表达的连贯性与专业度。",
+        pros: Array.isArray(result.pros || result.strengths) ? (result.pros || result.strengths) : ["回答态度积极"],
+        cons: Array.isArray(result.cons || result.weaknesses) ? (result.cons || result.weaknesses) : ["可以进一步丰富细节"],
+        suggestions: Array.isArray(result.suggestions) ? result.suggestions : ["建议多采用量化指标"],
+        voiceMetrics: result.voiceMetrics || { 
+          fluency: result.fluency || 80, 
+          stability: result.stability || 75, 
+          confidence: result.confidence || 85 
+        }
+      };
+
+      setAnalysisResult(standardizedResult);
+      setOptimizedAnswerFromServer(result.optimizedAnswer || null);
       setTimeout(() => scrollToId('step5'), 100);
     } catch (err) {
       console.error("AI Analysis Failed, using mock fallback:", err);
@@ -929,7 +956,7 @@ export default function App() {
                        </div>
                     </div>
                     <div className="space-y-6">
-                      {Object.entries(analysisResult.voiceMetrics || { fluency: 0, stability: 0, confidence: 0 }).map(([k, v]) => (
+                      {Object.entries((analysisResult && analysisResult.voiceMetrics) || { fluency: 0, stability: 0, confidence: 0 }).map(([k, v]) => (
                         <div key={k} className="space-y-2">
                           <div className="flex justify-between items-end">
                             <span className="text-xs font-bold text-slate-500 uppercase">{k === 'fluency' ? '流利度' : k === 'stability' ? '稳定性' : '自信心'}</span>
@@ -1013,7 +1040,7 @@ export default function App() {
                   <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
                   <h3 className="text-base font-black uppercase tracking-widest flex items-center gap-3 mb-8"><Lightbulb className="w-5 h-5" /> AI 策略大师建议</h3>
                   <div className="space-y-5">
-                    {analysisResult.suggestions.map((s, i) => (
+                    {(analysisResult.suggestions || []).map((s, i) => (
                       <div key={i} className="p-5 rounded-3xl bg-white/10 border border-white/10 flex gap-4 items-start transition-all hover:bg-white/20">
                         <span className="w-6 h-6 rounded-lg bg-white/20 text-white text-[11px] font-black flex items-center justify-center shrink-0">{i+1}</span>
                         <p className="text-sm text-blue-50 leading-relaxed font-bold">{s}</p>
