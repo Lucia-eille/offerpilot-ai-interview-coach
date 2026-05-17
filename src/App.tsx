@@ -28,6 +28,8 @@ interface Question {
 
 interface AnalysisResult {
   score: number;
+  grade: string;
+  summary: string;
   matching: string;
   structure: string;
   completeness: string;
@@ -77,6 +79,8 @@ const mockAnalysis = (mode: 'text' | 'voice', answer: string): AnalysisResult =>
   if (isTooShort) {
     return {
       score: 25,
+      grade: '仍需磨炼',
+      summary: '回答内容过于简略，缺乏实质性内容，无法有效评估你的专业能力。',
       matching: '回答内容过于简略，无法体现你与岗位的匹配度。',
       structure: '缺乏基本的逻辑结构，建议采用 STAR 法则重新组织。',
       completeness: '关键信息严重缺失。',
@@ -90,6 +94,8 @@ const mockAnalysis = (mode: 'text' | 'voice', answer: string): AnalysisResult =>
 
   return {
     score: 88,
+    grade: '卓越匹配',
+    summary: '你的回答展示了极强的专业素养和逻辑思维，能够精准捕捉岗位痛点并给出量化反馈。',
     matching: '你的经历与岗位要求的「自驱动」属性高度重合。',
     structure: '逻辑严密，建议在背景交代时更精短一些。',
     completeness: '回答覆盖了核心痛点，表现优异。',
@@ -200,6 +206,7 @@ export default function App() {
   const [answerMode, setAnswerMode] = useState<'text' | 'voice'>('text');
   const [textAnswer, setTextAnswer] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingStatus, setRecordingStatus] = useState<'idle' | 'recording' | 'finished' | 'invalid' | 'error'>('idle');
   const [recordedAudio, setRecordedAudio] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   
@@ -213,18 +220,55 @@ export default function App() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const [volumeScore, setVolumeScore] = useState(0); // For silence detection
+  const volumeHistoryRef = useRef<number[]>([]);
 
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       if (audioUrl) URL.revokeObjectURL(audioUrl);
+      if (audioContextRef.current) audioContextRef.current.close();
     };
   }, [audioUrl]);
 
+  const getSupportedMimeType = () => {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/mp4',
+    ];
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) return type;
+    }
+    return '';
+  };
+
   const startRecording = async () => {
     try {
+      setRecordingStatus('idle');
+      setErrorStatus(null);
+      setRecordingDuration(0);
+      volumeHistoryRef.current = [];
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      
+      // Setup Volume Detection
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+
+      const mimeType = getSupportedMimeType();
+      const options = mimeType ? { mimeType } : {};
+      const recorder = new MediaRecorder(stream, options);
+      
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
@@ -233,35 +277,78 @@ export default function App() {
       };
 
       recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' });
         const url = URL.createObjectURL(audioBlob);
+        
+        // Calculate final volume metrics
+        const avgVolume = volumeHistoryRef.current.length > 0 
+          ? volumeHistoryRef.current.reduce((a, b) => a + b, 0) / volumeHistoryRef.current.length 
+          : 0;
+        const maxVolume = volumeHistoryRef.current.length > 0
+          ? Math.max(...volumeHistoryRef.current)
+          : 0;
+
         setAudioUrl(url);
-        setRecordedAudio(true);
+        
+        // Validation: Must be > 3s AND have some volume
+        if (audioBlob.size < 1000 || avgVolume < 2 || maxVolume < 15) {
+          setRecordingStatus('invalid');
+          setRecordedAudio(false);
+        } else {
+          setRecordingStatus('finished');
+          setRecordedAudio(true);
+        }
+        
         stream.getTracks().forEach(track => track.stop());
+        if (audioContext.state !== 'closed') audioContext.close();
       };
 
       setAudioUrl(null);
       setRecordedAudio(false);
       setAnalysisResult(null);
-      setRecordingDuration(0);
       
-      recorder.start();
+      recorder.start(1000); // Check data every second
       setIsRecording(true);
+      setRecordingStatus('recording');
       
+      // Timer Logic
       recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
+        setRecordingDuration(prev => {
+          const next = prev + 1;
+          return next;
+        });
+
+        // Sample volume
+        if (analyserRef.current) {
+          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+          analyserRef.current.getByteFrequencyData(dataArray);
+          const currentAvg = dataArray.reduce((p, c) => p + c, 0) / dataArray.length;
+          volumeHistoryRef.current.push(currentAvg);
+          setVolumeScore(currentAvg);
+        }
       }, 1000);
-    } catch (err) {
+
+    } catch (err: any) {
       console.error('Error accessing microphone:', err);
-      alert('无法访问麦克风，请检查权限设置。');
+      setRecordingStatus('error');
+      alert(`无法访问麦克风: ${err.message || '权限被拒绝或设备不可用'}`);
     }
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+      try {
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch (e) {
+        console.error("Error stopping recorder:", e);
+      }
       setIsRecording(false);
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
     }
   };
 
@@ -272,7 +359,6 @@ export default function App() {
     setErrorStatus(null);
     
     try {
-      // Small artificial delay to show loading state
       const apiResult = await analyzeJD(targetRole, jobDescription);
       if (apiResult) {
         setJdAnalysis(apiResult);
@@ -281,10 +367,8 @@ export default function App() {
       }
     } catch (err) {
       console.warn("AI Analysis via API unavailable or failed, using enhanced mock:", err);
-      // ALWAYS fallback to mock data so the user isn't blocked
       setJdAnalysis(mockJDAnalysis(targetRole));
       
-      // Only show error status if it was a real failure (not just missing key)
       const hasKey = import.meta.env.VITE_GEMINI_API_KEY || (window as any).process?.env?.GEMINI_API_KEY;
       if (hasKey) {
         setErrorStatus({ 
@@ -294,7 +378,6 @@ export default function App() {
       }
     } finally {
       setIsLoading(prev => ({ ...prev, jd: false }));
-      // Ensure we navigate even on failure because we have mock data
       setTimeout(() => scrollToId('step2'), 100);
     }
   };
@@ -340,13 +423,14 @@ export default function App() {
     if (answerMode === 'text') {
       if (!textAnswer) return alert('请输入回答内容');
     } else {
-      if (!recordedAudio) return alert('请先录制语音回答');
-      if (recordingDuration < 3) return alert('录音时间过短，请重新录制一段完整回答（至少 3 秒）。');
-      if (textAnswer.trim()) {
-        answerContent = textAnswer;
-      } else {
-        answerContent = "（语音回答已成功录制，AI 正在分析语调与逻辑...）";
+      if (!recordedAudio) {
+        if (recordingStatus === 'invalid') {
+          return alert('未检测到有效语音内容，请重新录制一段完整回答（至少 3 秒且有声音）。');
+        }
+        return alert('请先录制语音回答');
       }
+      if (recordingDuration < 3) return alert('录音时间过短，请重新录制一段完整回答（至少 3 秒）。');
+      answerContent = textAnswer || "（语音回答已成功录制，AI 正在分析语调与逻辑...）";
     }
     
     setIsLoading(prev => ({ ...prev, analysis: true }));
@@ -363,7 +447,8 @@ export default function App() {
       const result = mockAnalysis(answerMode, answerContent);
       setAnalysisResult(result);
       
-      const mockOptimized = isTooShort(answerContent) 
+      const isShortResponse = answerContent.trim().length < 5 || answerContent.includes('你好');
+      const mockOptimized = isShortResponse 
         ? `针对这个问题，更好的回答应该是这样的：\n“在我过往担任${targetRole}期间，我遇到过一个... [详细描述 S/T]。当时我采取了 [A] ... 最终达到了 [R] ...。这证明了我的...能力。”`
         : `基于你的回答，我为你优化了表达：\n“在${targetRole}的实践中，我非常看重... [优化后的 STAR 结构] ...这不仅提升了效率，更夯实了底层逻辑。”`;
         
@@ -380,9 +465,7 @@ export default function App() {
     }
   };
 
-  const isTooShort = (text: string) => text.trim().length < 5 || text.includes('你好');
-
-  const optimizedText = selectedQuestion ? `“在我过往担任${targetRole}的项目实践中，我非常注重 [S] 数据驱动的闭环思路。特别是面临「${selectedQuestion.text.substring(0, 15)}...」这类挑战时，我主导了 [A] 整个核心流程의 重构。通过 [R] 为期三周的 A/B 测试，最终不仅弥补了下滑，还额外提升了 8% 的转化。这让我深刻认识到 [Reflection] 高颗粒度的逻辑分析对于${targetRole}产出的关键作用。”` : '';
+  const optimizedText = selectedQuestion ? `“在我过往担任${targetRole}的项目实践中，我非常注重 [S] 数据驱动的闭环思路。特别是面临「${selectedQuestion.text.substring(0, 15)}...」这类挑战时，我主导了 [A] 整个核心流程的重构。通过 [R] 为期三周的 A/B 测试，最终不仅弥补了下滑，还额外提升了 8% 的转化。这让我深刻认识到 [Reflection] 高颗粒度的逻辑分析对于${targetRole}产出的关键作用。”` : '';
 
   return (
     <div className="min-h-screen pb-40">
@@ -548,10 +631,10 @@ export default function App() {
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block mb-6">面试战略攻坚点</span>
                       <ul className="grid sm:grid-cols-2 gap-4">
                         {(jdAnalysis.focus || []).map((f, i) => (
-                          <li key={i} className="flex gap-3 text-xs text-slate-300 leading-relaxed font-bold bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-all">
-                            <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
-                            {f}
-                          </li>
+                           <li key={i} className="flex gap-3 text-xs text-slate-300 leading-relaxed font-bold bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-all">
+                             <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+                             {f}
+                           </li>
                         ))}
                       </ul>
                     </div>
@@ -670,25 +753,41 @@ export default function App() {
                       className={`relative w-28 h-28 rounded-full flex items-center justify-center transition-all shadow-2xl ${isRecording ? 'bg-red-500 text-white animate-pulse ring-8 ring-red-500/10' : 'bg-white text-blue-600 border border-slate-200 hover:scale-105 active:scale-95'}`}
                     >
                       {isRecording ? <Square className="w-10 h-10 fill-current" /> : <Mic className="w-12 h-12" />}
+                      {isRecording && (
+                        <svg className="absolute inset-0 w-full h-full -rotate-90">
+                           <circle 
+                             cx="56" cy="56" r="52" 
+                             fill="none" stroke="white" strokeWidth="4" 
+                             strokeDasharray={326}
+                             strokeDashoffset={326 - (326 * Math.min(volumeScore, 100) / 100)}
+                             className="opacity-20 transition-all duration-300"
+                           />
+                        </svg>
+                      )}
                     </button>
-                    {isRecording && (
-                      <div className="absolute -top-3 -right-3 px-3 py-1.5 bg-red-500 text-[11px] font-black text-white rounded-lg animate-bounce shadow-lg shadow-red-200">
+                    {(isRecording || recordingDuration > 0) && (
+                      <div className={`absolute -top-3 -right-3 px-3 py-1.5 ${isRecording ? 'bg-red-500 animate-bounce' : 'bg-slate-900'} text-[11px] font-black text-white rounded-lg shadow-lg`}>
                         {recordingDuration}s
                       </div>
                     )}
                   </div>
                   
                   <div className="text-center space-y-3">
-                    <p className={`text-base font-bold ${isRecording ? 'text-red-500' : 'text-slate-600'}`}>
+                    <p className={`text-base font-bold ${isRecording ? 'text-red-500' : recordingStatus === 'invalid' ? 'text-amber-500' : 'text-slate-600'}`}>
                       {isRecording 
                         ? '正在录音，请清晰有力地作答...' 
-                        : recordedAudio 
-                          ? (recordingDuration < 3 ? '录音太短啦，再说点什么吧' : '录制完成，点击回听或直接分析')
-                          : '点击麦克风开始，建议时长 1-3 分钟'}
+                        : recordingStatus === 'finished'
+                          ? '录制完成，点击回听或直接分析'
+                          : recordingStatus === 'invalid'
+                            ? '未检测到有效声音，请重新录制'
+                            : recordingStatus === 'error'
+                              ? '录音异常，请检查权限/设备'
+                              : '点击麦克风开始，建议时长 1-3 分钟'}
                     </p>
-                    {!isRecording && recordingDuration > 0 && recordingDuration < 3 && (
-                      <p className="text-xs text-amber-500 font-bold flex items-center justify-center gap-1.5">
-                        <AlertCircle className="w-4 h-4" /> 回答时长需大于 3 秒
+                    {recordingStatus === 'invalid' && (
+                      <p className="text-xs text-amber-500 font-bold flex items-center justify-center gap-1.5 px-6">
+                        <AlertCircle className="w-4 h-4 shrink-0" /> 
+                        说话时长需大于 3s 且音量正常，请靠近麦克风重试。
                       </p>
                     )}
                   </div>
@@ -721,48 +820,72 @@ export default function App() {
 
         {analysisResult && (
           <section id="step5" className="scroll-mt-24 space-y-20">
-            <div className="flex flex-col lg:flex-row items-center gap-12">
-              <div className="flex-1 space-y-6">
-                <SectionTitle step="Final Analysis" title="智慧测评诊断报告" />
-                <p className="text-xl text-slate-500 font-medium leading-relaxed">
-                  OfferPilot 已完成对您回答的深度解析。我们通过语义理解与逻辑匹配，为您生成的专属诊断报告如下：
-                </p>
-                <div className="flex flex-wrap gap-4 pt-4">
-                  <div className="px-6 py-4 rounded-3xl bg-white border border-slate-100 shadow-sm flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-xl shadow-lg shadow-blue-200">{analysisResult.score}</div>
-                    <div>
-                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">综合评估得分</div>
-                      <div className="text-sm font-bold text-slate-700 mt-1">{analysisResult.score > 80 ? '卓越匹配' : analysisResult.score > 60 ? '基准通过' : '仍需磨炼'}</div>
-                    </div>
-                  </div>
+            <div className="space-y-12">
+              <div className="flex flex-col lg:flex-row items-start justify-between gap-8">
+                <div className="max-w-2xl space-y-4">
+                  <SectionTitle step="Phase 05" title="智慧测评诊断报告" />
+                  <p className="text-xl text-slate-500 font-medium leading-relaxed">
+                    OfferPilot 已完成对您回答的深度解析。我们通过语义理解与逻辑匹配，为您生成的专属诊断报告如下：
+                  </p>
                 </div>
               </div>
 
-              <div className="w-full lg:w-[480px] grid grid-cols-2 gap-4">
-                <div className="col-span-2 p-8 bg-slate-900 rounded-[2.5rem] shadow-2xl text-white relative overflow-hidden group">
-                  <div className="absolute -right-4 -bottom-4 w-40 h-40 bg-blue-500/20 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-1000"></div>
-                  <div className="relative z-10 space-y-6">
-                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">语音/逻辑感官</div>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {/* 综合评分大卡片 */}
+                <GlassCard className="lg:col-span-7 !p-10 bg-slate-900 border-slate-800 text-white relative overflow-hidden group shadow-2xl">
+                  <div className="absolute top-0 right-0 p-12 opacity-5 scale-150 rotate-12 group-hover:rotate-45 transition-transform duration-1000"><Zap className="w-64 h-64 text-white" /></div>
+                  <div className="relative z-10 grid sm:grid-cols-12 gap-10 items-center">
+                    <div className="sm:col-span-5 flex flex-col items-center sm:items-start gap-4">
+                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">综合测评得分</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-8xl font-black tracking-tighter text-blue-400">{analysisResult.score}</span>
+                        <span className="text-2xl font-black text-slate-500">/ 100</span>
+                      </div>
+                      <div className="px-5 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm font-black tracking-wider">
+                        {analysisResult.grade}
+                      </div>
+                    </div>
+                    <div className="sm:col-span-7 space-y-4 border-l border-white/5 pl-0 sm:pl-10">
+                      <div className="p-3 bg-white/5 rounded-2xl flex items-center gap-3">
+                        <Sparkles className="w-5 h-5 text-blue-400 shrink-0" />
+                        <span className="text-xs font-bold text-slate-300">AI 核心诊断结论</span>
+                      </div>
+                      <p className="text-lg font-medium text-slate-300 leading-relaxed italic">
+                        “{analysisResult.summary}”
+                      </p>
+                    </div>
+                  </div>
+                </GlassCard>
+
+                {/* 语音指标卡片 */}
+                <GlassCard className="lg:col-span-5 !p-10 border-slate-100 bg-white shadow-xl relative overflow-hidden group">
+                  <div className="relative z-10 space-y-8">
+                    <div className="flex items-center justify-between">
+                       <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">感官指标诊断</div>
+                       <div className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase ${answerMode === 'voice' ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-400'}`}>
+                         {answerMode === 'voice' ? '语音实时采集' : '语义逻辑模拟'}
+                       </div>
+                    </div>
                     <div className="space-y-6">
-                       {Object.entries(analysisResult.voiceMetrics || { fluency: 85, stability: 78, confidence: 90 }).map(([k, v]) => (
-                         <div key={k} className="space-y-2">
-                           <div className="flex justify-between items-end">
-                             <span className="text-xs font-bold text-slate-300 uppercase">{k === 'fluency' ? '流利度' : k === 'stability' ? '稳定性' : '自信心'}</span>
-                             <span className="text-sm font-black text-blue-400">{v}%</span>
-                           </div>
-                           <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                             <motion.div 
+                      {Object.entries(analysisResult.voiceMetrics || { fluency: 85, stability: 78, confidence: 90 }).map(([k, v]) => (
+                        <div key={k} className="space-y-2">
+                          <div className="flex justify-between items-end">
+                            <span className="text-xs font-bold text-slate-500 uppercase">{k === 'fluency' ? '流利度' : k === 'stability' ? '稳定性' : '自信心'}</span>
+                            <span className="text-sm font-black text-blue-600">{v}%</span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <motion.div 
                               initial={{ width: 0 }}
                               whileInView={{ width: `${v}%` }}
                               transition={{ duration: 1.5, delay: 0.2 }}
                               className="h-full accent-gradient"
-                             ></motion.div>
-                           </div>
-                         </div>
-                       ))}
+                            ></motion.div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
+                </GlassCard>
               </div>
             </div>
 
