@@ -3,9 +3,11 @@ import {
   Sparkles, Send, ChevronRight, Search, MessageSquare, Target, 
   CheckCircle2, ArrowRight, BarChart3, FileText, UserCircle,
   Lightbulb, AlertCircle, Loader2, Menu, X, Mic, Square, 
-  Volume2, BrainCircuit, ClipboardCheck, LayoutDashboard, Zap
+  Volume2, BrainCircuit, ClipboardCheck, LayoutDashboard, Zap,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { analyzeJD, generateQuestions, analyzeAnswer } from './services/geminiService';
 
 // --- Types ---
 interface JDAnalysis {
@@ -198,6 +200,7 @@ export default function App() {
   
   const [optimizedAnswerFromServer, setOptimizedAnswerFromServer] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState({ jd: false, questions: false, analysis: false });
+  const [errorStatus, setErrorStatus] = useState<{ type: string, message: string } | null>(null);
 
   // --- Voice Recording Logic ---
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -258,30 +261,51 @@ export default function App() {
   };
 
   // --- API Calls ---
-  const handleAnalyzeJD = async () => {
+  const handleAnalyzeJD = async (useMock = false) => {
     if (!targetRole || !jobDescription) return alert('请输入完整岗位信息');
     setIsLoading(prev => ({ ...prev, jd: true }));
+    setErrorStatus(null);
     try {
-      await new Promise(r => setTimeout(r, 1500));
-      setJdAnalysis(mockJDAnalysis(targetRole));
+      if (useMock) throw new Error("Fallback to mock");
+      
+      const result = await analyzeJD(targetRole, jobDescription);
+      setJdAnalysis(result);
       setTimeout(() => scrollToId('step2'), 100);
     } catch (err) {
-      console.error(err);
-      alert('分析 JD 失败，请稍后重试');
+      console.error("AI Analysis Failed, using mock fallback:", err);
+      // Fallback to mock
+      setJdAnalysis(mockJDAnalysis(targetRole));
+      if (!useMock) {
+        setErrorStatus({ 
+          type: 'jd', 
+          message: 'AI 深度解析暂时失败，已为您使用本地模拟分析继续。' 
+        });
+      }
+      setTimeout(() => scrollToId('step2'), 100);
     } finally {
       setIsLoading(prev => ({ ...prev, jd: false }));
     }
   };
 
-  const handleGenerateQuestions = async () => {
+  const handleGenerateQuestions = async (useMock = false) => {
     setIsLoading(prev => ({ ...prev, questions: true }));
+    setErrorStatus(null);
     try {
-      await new Promise(r => setTimeout(r, 1500));
-      setQuestions(mockQuestions(targetRole));
+      if (useMock) throw new Error("Fallback to mock");
+      
+      const result = await generateQuestions(targetRole, jdAnalysis);
+      setQuestions(result);
       setTimeout(() => scrollToId('step3'), 100);
     } catch (err) {
-      console.error(err);
-      alert('生成问题失败');
+      console.error("AI Question Gen Failed, using mock fallback:", err);
+      setQuestions(mockQuestions(targetRole));
+      if (!useMock) {
+         setErrorStatus({ 
+           type: 'questions', 
+           message: '定制题库生成稍有延迟，已为您加载标准题目。' 
+         });
+      }
+      setTimeout(() => scrollToId('step3'), 100);
     } finally {
       setIsLoading(prev => ({ ...prev, questions: false }));
     }
@@ -294,38 +318,47 @@ export default function App() {
     setTimeout(() => scrollToId('step4'), 100);
   };
 
-  const handleSubmitAnswer = async () => {
+  const handleSubmitAnswer = async (useMock = false) => {
+    if (!selectedQuestion) return;
     let answerContent = textAnswer;
     if (answerMode === 'text') {
       if (!textAnswer) return alert('请输入回答内容');
     } else {
       if (!recordedAudio) return alert('请先录制语音回答');
       if (recordingDuration < 3) return alert('录音时间过短，请重新录制一段完整回答（至少 3 秒）。');
-      // 由于当前环境限制，此处使用模拟转录逻辑
       if (textAnswer.trim()) {
-        answerContent = textAnswer; // 如果用户在文本框也输入了，将其视为语音识别结果
+        answerContent = textAnswer;
       } else {
         answerContent = "（语音回答已成功录制，AI 正在分析语调与逻辑...）";
       }
     }
     
     setIsLoading(prev => ({ ...prev, analysis: true }));
+    setErrorStatus(null);
     try {
-      await new Promise(r => setTimeout(r, 2000));
+      if (useMock) throw new Error("Fallback to mock");
       
+      const result = await analyzeAnswer(targetRole, selectedQuestion.text, answerContent, answerMode);
+      setAnalysisResult(result);
+      setOptimizedAnswerFromServer(result.optimizedAnswer);
+      setTimeout(() => scrollToId('step5'), 100);
+    } catch (err) {
+      console.error("AI Analysis Failed, using mock fallback:", err);
       const result = mockAnalysis(answerMode, answerContent);
       setAnalysisResult(result);
       
-      // 生成一个优化后的参考答案（模拟）
       const mockOptimized = isTooShort(answerContent) 
         ? `针对这个问题，更好的回答应该是这样的：\n“在我过往担任${targetRole}期间，我遇到过一个... [详细描述 S/T]。当时我采取了 [A] ... 最终达到了 [R] ...。这证明了我的...能力。”`
         : `基于你的回答，我为你优化了表达：\n“在${targetRole}的实践中，我非常看重... [优化后的 STAR 结构] ...这不仅提升了效率，更夯实了底层逻辑。”`;
         
       setOptimizedAnswerFromServer(mockOptimized);
+      if (!useMock) {
+        setErrorStatus({ 
+          type: 'analysis', 
+          message: '深度诊断报告稍有延迟，已为您展示基础分析。' 
+        });
+      }
       setTimeout(() => scrollToId('step5'), 100);
-    } catch (err) {
-      console.error(err);
-      alert('分析提交失败');
     } finally {
       setIsLoading(prev => ({ ...prev, analysis: false }));
     }
@@ -420,10 +453,23 @@ export default function App() {
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block px-1">职位描述 (Job Description)</label>
               <textarea value={jobDescription} onChange={e => setJobDescription(e.target.value)} placeholder="粘贴详细的岗位职责、任职要求，我们的 AI 将为您深度定制..." rows={5} className="w-full bg-white border border-slate-200 rounded-xl p-5 text-sm text-slate-800 placeholder:text-slate-300 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all shadow-sm resize-none" />
             </div>
-            <div className="md:col-span-2 flex justify-end">
-              <button disabled={isLoading.jd} onClick={handleAnalyzeJD} className="px-12 py-4 rounded-2xl accent-gradient text-white font-black text-sm flex items-center gap-2 shadow-2xl shadow-blue-500/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50">
-                {isLoading.jd ? <Loader2 className="w-5 h-5 animate-spin" /> : <BrainCircuit className="w-5 h-5" />} 启动 AI 深度解析
-              </button>
+            <div className="md:col-span-2 flex flex-col gap-4">
+              {errorStatus?.type === 'jd' && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>{errorStatus.message}</span>
+                  </div>
+                  <button onClick={() => handleAnalyzeJD(true)} className="flex items-center gap-1 font-bold border-b border-amber-300">
+                    <RefreshCw className="w-3 h-3" /> 重试 AI 解析
+                  </button>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <button disabled={isLoading.jd} onClick={() => handleAnalyzeJD()} className="px-12 py-4 rounded-2xl accent-gradient text-white font-black text-sm flex items-center gap-2 shadow-2xl shadow-blue-500/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50">
+                  {isLoading.jd ? <Loader2 className="w-5 h-5 animate-spin" /> : <BrainCircuit className="w-5 h-5" />} 启动 AI 深度解析
+                </button>
+              </div>
             </div>
           </GlassCard>
         </section>
@@ -439,7 +485,7 @@ export default function App() {
                   <Target className="w-4 h-4" /> 核心业务职责
                 </h3>
                 <ul className="space-y-6">
-                  {jdAnalysis.responsibilities.map((r, i) => (
+                  {(jdAnalysis.responsibilities || []).map((r, i) => (
                     <li key={i} className="flex gap-4 text-sm text-slate-600 leading-relaxed group">
                       <div className="w-8 h-8 rounded-xl bg-white border border-blue-100 shadow-sm flex items-center justify-center text-[10px] font-black text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-all shrink-0">0{i+1}</div>
                       <p className="font-medium pt-1">{r}</p>
@@ -453,7 +499,7 @@ export default function App() {
                 <GlassCard className="sm:col-span-1 !p-8 border-emerald-100/50">
                   <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] block mb-6 px-1 flex items-center gap-2"><Zap className="w-3.5 h-3.5" /> 硬核技能矩阵</span>
                   <div className="flex flex-wrap gap-2.5">
-                    {[...jdAnalysis.competencies, ...jdAnalysis.skills].map(s => (
+                    {[...(jdAnalysis.competencies || []), ...(jdAnalysis.skills || [])].map(s => (
                       <span key={s} className="px-4 py-2 bg-emerald-50 text-emerald-700 rounded-2xl text-[11px] font-bold border border-emerald-100 transition-all hover:scale-105 cursor-default">
                         {s}
                       </span>
@@ -464,7 +510,7 @@ export default function App() {
                 <GlassCard className="sm:col-span-1 !p-8 border-orange-100/50">
                   <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.2em] block mb-6 px-1 flex items-center gap-2"><UserCircle className="w-3.5 h-3.5" /> 关键软素质</span>
                   <div className="flex flex-wrap gap-2.5">
-                     {jdAnalysis.softSkills.map(s => (
+                     {(jdAnalysis.softSkills || []).map(s => (
                        <span key={s} className="px-4 py-2 bg-orange-50 text-orange-700 rounded-2xl text-[11px] font-bold border border-orange-100 transition-all hover:scale-105 cursor-default">
                          {s}
                        </span>
@@ -478,7 +524,7 @@ export default function App() {
                     <div className="flex-1">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block mb-6">面试战略攻坚点</span>
                       <ul className="grid sm:grid-cols-2 gap-4">
-                        {jdAnalysis.focus.map((f, i) => (
+                        {(jdAnalysis.focus || []).map((f, i) => (
                           <li key={i} className="flex gap-3 text-xs text-slate-300 leading-relaxed font-bold bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-all">
                             <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
                             {f}
@@ -494,9 +540,14 @@ export default function App() {
                            <div className="h-full bg-blue-500 w-[92%]"></div>
                         </div>
                       </div>
-                      <button onClick={handleGenerateQuestions} disabled={isLoading.questions} className="w-full mt-auto py-5 rounded-2xl bg-blue-600 text-white font-black text-xs flex items-center justify-center gap-3 shadow-2xl shadow-blue-500/20 hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                      <button onClick={() => handleGenerateQuestions()} disabled={isLoading.questions} className="w-full mt-auto py-5 rounded-2xl bg-blue-600 text-white font-black text-xs flex items-center justify-center gap-3 shadow-2xl shadow-blue-500/20 hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98] transition-all">
                         {isLoading.questions ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />} 定制模拟真题
                       </button>
+                      {errorStatus?.type === 'questions' && (
+                        <p className="text-[10px] text-amber-500 font-bold bg-amber-50/50 p-2 rounded-lg border border-amber-100/50">
+                          {errorStatus.message}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </GlassCard>
@@ -551,7 +602,19 @@ export default function App() {
               {answerMode === 'text' ? (
                 <div className="space-y-6">
                   <textarea value={textAnswer} onChange={e => setTextAnswer(e.target.value)} placeholder="请开始你的表演，我们建议采用 STAR 原则（情景、任务、行动、结果）进行详细阐述..." rows={8} className="w-full bg-white border border-slate-200 rounded-2xl p-6 text-sm text-slate-800 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all resize-none shadow-inner" />
-                  <div className="flex justify-end"><button onClick={handleSubmitAnswer} disabled={isLoading.analysis} className="px-10 py-4 rounded-xl bg-slate-900 text-white font-black text-sm flex items-center gap-2 hover:bg-slate-800 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 shadow-xl">{isLoading.analysis ? <Loader2 className="w-5 h-5 animate-spin" /> : <MessageSquare className="w-4 h-4" />} 提交并分析</button></div>
+                  <div className="flex flex-col gap-4">
+                    {errorStatus?.type === 'analysis' && (
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" />
+                          <span>{errorStatus.message}</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex justify-end order-first sm:order-none">
+                      <button onClick={() => handleSubmitAnswer()} disabled={isLoading.analysis} className="px-10 py-4 rounded-xl bg-slate-900 text-white font-black text-sm flex items-center gap-2 hover:bg-slate-800 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 shadow-xl">{isLoading.analysis ? <Loader2 className="w-5 h-5 animate-spin" /> : <MessageSquare className="w-4 h-4" />} 提交并分析</button>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col items-center py-6 space-y-8">
@@ -593,11 +656,18 @@ export default function App() {
 
                   <button 
                     disabled={isLoading.analysis || !recordedAudio || recordingDuration < 3} 
-                    onClick={handleSubmitAnswer} 
+                    onClick={() => handleSubmitAnswer()} 
                     className="px-12 py-4 rounded-2xl bg-blue-600 text-white font-black text-sm flex items-center gap-2 hover:bg-blue-700 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:cursor-not-allowed shadow-2xl shadow-blue-500/20"
                   >
                     {isLoading.analysis ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />} 发送给 AI 专家分析
                   </button>
+
+                  {errorStatus?.type === 'analysis' && (
+                    <div className="max-w-xs p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs flex items-center gap-2">
+                       <AlertCircle className="w-4 h-4 shrink-0" />
+                       <span>{errorStatus.message}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </GlassCard>
