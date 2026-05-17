@@ -50,6 +50,58 @@ const scrollToId = (id: string) => {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
+/**
+ * Perform deep audio analysis to detect silence or low-quality recordings
+ */
+const validateVoiceRecording = async (blob: Blob): Promise<{ 
+  isValid: boolean; 
+  metrics: { duration: number; peak: number; rms: number; avg: number; silentRatio: number } 
+}> => {
+  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const channelData = audioBuffer.getChannelData(0); // Analysis of the first channel
+    
+    const duration = audioBuffer.duration;
+    let sum = 0;
+    let sumSq = 0;
+    let peak = 0;
+    let silentSamples = 0;
+    const silenceThreshold = 0.01;
+
+    for (let i = 0; i < channelData.length; i++) {
+      const val = Math.abs(channelData[i]);
+      sum += val;
+      sumSq += val * val;
+      if (val > peak) peak = val;
+      if (val < silenceThreshold) silentSamples++;
+    }
+
+    const avg = sum / channelData.length;
+    const rms = Math.sqrt(sumSq / channelData.length);
+    const silentRatio = silentSamples / channelData.length;
+
+    // Hard rules from user requirements
+    const isValid = duration >= 3 && 
+                    peak >= 0.02 && 
+                    rms >= 0.01 && 
+                    avg >= 0.008 && 
+                    silentRatio <= 0.9;
+
+    return {
+      isValid,
+      metrics: { duration, peak, rms, avg, silentRatio }
+    };
+  } catch (error) {
+    console.error("Audio validation failed:", error);
+    return { isValid: false, metrics: { duration: 0, peak: 0, rms: 0, avg: 0, silentRatio: 1 } };
+  } finally {
+    await audioContext.close();
+  }
+};
+
 // --- Mock Data Generators ---
 const mockJDAnalysis = (role: string): JDAnalysis => ({
   responsibilities: [
@@ -74,36 +126,46 @@ const mockQuestions = (role: string): Question[] => [
 ];
 
 const mockAnalysis = (mode: 'text' | 'voice', answer: string): AnalysisResult => {
-  const isTooShort = answer.trim().length < 5 || answer.includes('你好');
+  const isTooShort = answer.trim().length < 5 || (mode === 'text' && answer.length < 50);
   
   if (isTooShort) {
+    const score = Math.floor(Math.random() * 15) + 20; // 20-35
     return {
-      score: 25,
+      score,
       grade: '仍需磨炼',
-      summary: '回答内容过于简略，缺乏实质性内容，无法有效评估你的专业能力。',
-      matching: '回答内容过于简略，无法体现你与岗位的匹配度。',
-      structure: '缺乏基本的逻辑结构，建议采用 STAR 法则重新组织。',
-      completeness: '关键信息严重缺失。',
-      clarity: '字数太少，信息密度极低。',
-      pros: ['态度积极（愿意尝试回答）'],
-      cons: ['篇幅过短', '没有细节支撑', '逻辑缺失'],
-      suggestions: ['请详细描述一个具体的案例', '按照背景、任务、行动、结果的顺序来阐述', '字数建议在 150 字以上'],
-      voiceMetrics: mode === 'voice' ? { fluency: 40, stability: 50, confidence: 30 } : undefined
+      summary: '回答内容过于简略或缺乏实质性业务细节，建议增加具体案例支撑。',
+      matching: '回答内容无法支撑岗位对业务颗粒度的要求。',
+      structure: '结构松散，建议采用 STAR 法则（情景/任务/行动/结果）重新组织。',
+      completeness: '关键结果数据（Result）严重缺失。',
+      clarity: '表达重点不清晰，建议梳理核心论点。',
+      pros: ['态度端正（积极参与模拟）'],
+      cons: ['内容空洞', '逻辑链条断裂'],
+      suggestions: ['请尝试以“在我之前做过的一个项目中...”作为开头', '字数建议控制在 200-400 字之间'],
+      voiceMetrics: mode === 'voice' ? { fluency: 45, stability: 52, confidence: 40 } : undefined
     };
   }
 
+  // Normal mock quality variation
+  const baseScore = mode === 'voice' ? 78 : 82;
+  const variance = Math.floor(Math.random() * 10);
+  const finalScore = baseScore + variance;
+
   return {
-    score: 88,
-    grade: '卓越匹配',
-    summary: '你的回答展示了极强的专业素养和逻辑思维，能够精准捕捉岗位痛点并给出量化反馈。',
-    matching: '你的经历与岗位要求的「自驱动」属性高度重合。',
-    structure: '逻辑严密，建议在背景交代时更精短一些。',
-    completeness: '回答覆盖了核心痛点，表现优异。',
-    clarity: '表达流畅，论点清晰可见。',
-    pros: ['重点突出', '有数据支撑', '态度诚恳'],
-    cons: ['结尾动作描述稍显仓促', '可以增加反思深度'],
-    suggestions: ['尝试加入更多具体的量化结果', '在关键环节增加心路历程描述', '收尾时可以再次强调对岗位的渴求'],
-    voiceMetrics: mode === 'voice' ? { fluency: 92, stability: 88, confidence: 95 } : undefined
+    score: finalScore,
+    grade: finalScore > 85 ? '卓越匹配' : '表现良好',
+    summary: '你的回答展示了较好的业务洞察，逻辑基本完整，能够清晰表达核心价值点。',
+    matching: '经历与岗位要求的核心能力项匹配度较高。',
+    structure: 'STAR 结构基本完整，建议在“行动”环节增加更多量化指标。',
+    completeness: '覆盖了主要岗位痛点，细节仍有挖掘空间。',
+    clarity: '表达整体流畅，个别词汇使用可以更精准。',
+    pros: ['逻辑清晰', '案例典型', '语感自然'],
+    cons: ['数据敏感度可以进一步加强', '结论部分的升华略显仓促'],
+    suggestions: ['尝试加入更多百分比或具体的业务指标', '在描述挑战时增加心路历程的还原'],
+    voiceMetrics: mode === 'voice' ? { 
+      fluency: 85 + Math.floor(Math.random() * 10), 
+      stability: 80 + Math.floor(Math.random() * 10), 
+      confidence: 88 + Math.floor(Math.random() * 7) 
+    } : undefined
   };
 };
 
@@ -276,27 +338,22 @@ export default function App() {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' });
         const url = URL.createObjectURL(audioBlob);
-        
-        // Calculate final volume metrics
-        const avgVolume = volumeHistoryRef.current.length > 0 
-          ? volumeHistoryRef.current.reduce((a, b) => a + b, 0) / volumeHistoryRef.current.length 
-          : 0;
-        const maxVolume = volumeHistoryRef.current.length > 0
-          ? Math.max(...volumeHistoryRef.current)
-          : 0;
-
         setAudioUrl(url);
+
+        // Perform Deep Validation (Post-processing)
+        const validation = await validateVoiceRecording(audioBlob);
         
-        // Validation: Must be > 3s AND have some volume
-        if (audioBlob.size < 1000 || avgVolume < 2 || maxVolume < 15) {
+        if (!validation.isValid) {
           setRecordingStatus('invalid');
           setRecordedAudio(false);
+          console.warn("Recording rejected by deep analysis:", validation.metrics);
         } else {
           setRecordingStatus('finished');
           setRecordedAudio(true);
+          console.log("Recording validated successfully:", validation.metrics);
         }
         
         stream.getTracks().forEach(track => track.stop());
@@ -425,12 +482,14 @@ export default function App() {
     } else {
       if (!recordedAudio) {
         if (recordingStatus === 'invalid') {
-          return alert('未检测到有效语音内容，请重新录制一段完整回答（至少 3 秒且有声音）。');
+          return alert('未检测到有效语音内容，请重新录制一段完整回答（至少 3 秒、有音量且无明显停顿）。');
         }
         return alert('请先录制语音回答');
       }
+      // Re-check duration
       if (recordingDuration < 3) return alert('录音时间过短，请重新录制一段完整回答（至少 3 秒）。');
-      answerContent = textAnswer || "（语音回答已成功录制，AI 正在分析语调与逻辑...）";
+      
+      answerContent = textAnswer || "（语音真题演练，正在分析表达流利度与结构...）";
     }
     
     setIsLoading(prev => ({ ...prev, analysis: true }));
@@ -752,7 +811,7 @@ export default function App() {
                       onClick={isRecording ? stopRecording : startRecording} 
                       className={`relative w-28 h-28 rounded-full flex items-center justify-center transition-all shadow-2xl ${isRecording ? 'bg-red-500 text-white animate-pulse ring-8 ring-red-500/10' : 'bg-white text-blue-600 border border-slate-200 hover:scale-105 active:scale-95'}`}
                     >
-                      {isRecording ? <Square className="w-10 h-10 fill-current" /> : <Mic className="w-12 h-12" />}
+                      {isRecording ? <Square className="w-10 h-10 fill-current" /> : (recordedAudio && recordingStatus === 'finished') ? <RefreshCw className="w-10 h-10" /> : <Mic className="w-12 h-12" />}
                       {isRecording && (
                         <svg className="absolute inset-0 w-full h-full -rotate-90">
                            <circle 
@@ -785,9 +844,12 @@ export default function App() {
                               : '点击麦克风开始，建议时长 1-3 分钟'}
                     </p>
                     {recordingStatus === 'invalid' && (
-                      <p className="text-xs text-amber-500 font-bold flex items-center justify-center gap-1.5 px-6">
-                        <AlertCircle className="w-4 h-4 shrink-0" /> 
-                        说话时长需大于 3s 且音量正常，请靠近麦克风重试。
+                      <p className="text-xs text-amber-500 font-bold flex flex-col items-center justify-center gap-2 px-6">
+                        <div className="flex items-center gap-1.5">
+                          <AlertCircle className="w-4 h-4 shrink-0" /> 
+                          未检测到有效语音内容，请重新录制。
+                        </div>
+                        <span className="font-medium text-[10px] opacity-70">确保录音大于 3s 且有明显音量起伏</span>
                       </p>
                     )}
                   </div>
@@ -867,7 +929,7 @@ export default function App() {
                        </div>
                     </div>
                     <div className="space-y-6">
-                      {Object.entries(analysisResult.voiceMetrics || { fluency: 85, stability: 78, confidence: 90 }).map(([k, v]) => (
+                      {Object.entries(analysisResult.voiceMetrics || { fluency: 0, stability: 0, confidence: 0 }).map(([k, v]) => (
                         <div key={k} className="space-y-2">
                           <div className="flex justify-between items-end">
                             <span className="text-xs font-bold text-slate-500 uppercase">{k === 'fluency' ? '流利度' : k === 'stability' ? '稳定性' : '自信心'}</span>
