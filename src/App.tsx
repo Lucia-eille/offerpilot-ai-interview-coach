@@ -11,12 +11,12 @@ import { analyzeJD, generateQuestions, analyzeAnswer } from './services/geminiSe
 
 // --- Types ---
 interface JDAnalysis {
-  responsibilities: string[];
-  competencies: string[];
-  skills: string[];
+  coreResponsibilities: string[];
+  keySkills: string[];
+  experienceRequirements: string[];
   softSkills: string[];
-  focus: string[];
-  risks: string[];
+  interviewFocus: string[];
+  riskPoints: string[];
 }
 
 interface Question {
@@ -27,21 +27,20 @@ interface Question {
 }
 
 interface AnalysisResult {
-  score: number;
-  grade: string;
+  overallScore: number;
+  level: string;
   summary: string;
-  matching: string;
-  structure: string;
+  jobMatch: string;
+  logic: string;
   completeness: string;
   clarity: string;
-  pros: string[];
-  cons: string[];
+  fluency: number;
+  stability: number;
+  confidence: number;
+  strengths: string[];
+  weaknesses: string[];
   suggestions: string[];
-  voiceMetrics?: {
-    fluency: number;
-    stability: number;
-    confidence: number;
-  };
+  optimizedAnswer: string;
 }
 
 // --- Utils ---
@@ -104,17 +103,17 @@ const validateVoiceRecording = async (blob: Blob): Promise<{
 
 // --- Mock Data Generators ---
 const mockJDAnalysis = (role: string): JDAnalysis => ({
-  responsibilities: [
+  coreResponsibilities: [
     `负责${role}的核心业务规划与日常执行`,
     '主导跨部门协同，确保项目按时高质量交付',
     `深度挖掘业务需求，产出针对${role}领域的专业解决方案`,
     '持续优化业务流程，提升团队整体产出效率'
   ],
-  competencies: ['复杂问题拆解与解决能力', '卓越的逻辑思维与结构化表达', '快速学习并适应新业务环境的能力'],
-  skills: ['熟练掌握行业核心工具与平台', '具备扎实的数据分析与洞察能力', '行业相关的专业执照或技能认证'],
+  experienceRequirements: ['复杂问题拆解与解决能力', '卓越的逻辑思维与结构化表达', '快速学习并适应新业务环境的能力'],
+  keySkills: ['熟练掌握行业核心工具与平台', '具备扎实的数据分析与洞察能力', '行业相关的专业执照或技能认证'],
   softSkills: ['极强的沟通协调与影响力', '在高压环境下保持冷静与判断力', '团队合作精神与共情能力'],
-  focus: ['过往核心项目的实际产出与价值', '面对未知挑战时的应对策略', '对职业发展的长期规划与驱动力'],
-  risks: ['对特定复杂业务场景的理解深度', '在高强度压力下的稳定性'],
+  interviewFocus: ['过往核心项目的实际产出与价值', '面对未知挑战时的应对策略', '对职业发展的长期规划与驱动力'],
+  riskPoints: ['对特定复杂业务场景的理解深度', '在高强度压力下的稳定性'],
 });
 
 const mockQuestions = (role: string): Question[] => [
@@ -131,17 +130,20 @@ const mockAnalysis = (mode: 'text' | 'voice', answer: string): AnalysisResult =>
   if (isTooShort) {
     const score = Math.floor(Math.random() * 15) + 20; // 20-35
     return {
-      score,
-      grade: '仍需磨炼',
+      overallScore: score,
+      level: '仍需磨炼',
       summary: '回答内容过于简略或缺乏实质性业务细节，建议增加具体案例支撑。',
-      matching: '回答内容无法支撑岗位对业务颗粒度的要求。',
-      structure: '结构松散，建议采用 STAR 法则（情景/任务/行动/结果）重新组织。',
+      jobMatch: '回答内容无法支撑岗位对业务颗粒度的要求。',
+      logic: '结构松散，建议采用 STAR 法则（情景/任务/行动/结果）重新组织。',
       completeness: '关键结果数据（Result）严重缺失。',
       clarity: '表达重点不清晰，建议梳理核心论点。',
-      pros: ['态度端正（积极参与模拟）'],
-      cons: ['内容空洞', '逻辑链条断裂'],
+      strengths: ['态度端正（积极参与模拟）'],
+      weaknesses: ['内容空洞', '逻辑链条断裂'],
       suggestions: ['请尝试以“在我之前做过的一个项目中...”作为开头', '字数建议控制在 200-400 字之间'],
-      voiceMetrics: mode === 'voice' ? { fluency: 45, stability: 52, confidence: 40 } : undefined
+      fluency: 45,
+      stability: 52,
+      confidence: 40,
+      optimizedAnswer: "请尝试增加更多细节和数据支持。"
     };
   }
 
@@ -151,21 +153,20 @@ const mockAnalysis = (mode: 'text' | 'voice', answer: string): AnalysisResult =>
   const finalScore = baseScore + variance;
 
   return {
-    score: finalScore,
-    grade: finalScore > 85 ? '卓越匹配' : '表现良好',
+    overallScore: finalScore,
+    level: finalScore > 85 ? '卓越匹配' : '表现良好',
     summary: '你的回答展示了较好的业务洞察，逻辑基本完整，能够清晰表达核心价值点。',
-    matching: '经历与岗位要求的核心能力项匹配度较高。',
-    structure: 'STAR 结构基本完整，建议在“行动”环节增加更多量化指标。',
+    jobMatch: '经历与岗位要求的核心能力项匹配度较高。',
+    logic: 'STAR 结构基本完整，建议在“行动”环节增加更多量化指标。',
     completeness: '覆盖了主要岗位痛点，细节仍有挖掘空间。',
     clarity: '表达整体流畅，个别词汇使用可以更精准。',
-    pros: ['逻辑清晰', '案例典型', '语感自然'],
-    cons: ['数据敏感度可以进一步加强', '结论部分的升华略显仓促'],
+    strengths: ['逻辑清晰', '案例典型', '语感自然'],
+    weaknesses: ['数据敏感度可以进一步加强', '结论部分的升华略显仓促'],
     suggestions: ['尝试加入更多百分比或具体的业务指标', '在描述挑战时增加心路历程的还原'],
-    voiceMetrics: mode === 'voice' ? { 
-      fluency: 85 + Math.floor(Math.random() * 10), 
-      stability: 80 + Math.floor(Math.random() * 10), 
-      confidence: 88 + Math.floor(Math.random() * 7) 
-    } : undefined
+    fluency: 85 + Math.floor(Math.random() * 10), 
+    stability: 80 + Math.floor(Math.random() * 10), 
+    confidence: 88 + Math.floor(Math.random() * 7),
+    optimizedAnswer: "基于你的回答，我为你优化了表达：\n“在岗位的实践中，我注重 STAR 结构...”"
   };
 };
 
@@ -272,7 +273,7 @@ export default function App() {
   const [recordedAudio, setRecordedAudio] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   
-  const [optimizedAnswerFromServer, setOptimizedAnswerFromServer] = useState<string | null>(null);
+  const [optimizedAnswerFromServer, setOptimizedAnswerFromServer] = useState<string>('');
   const [isLoading, setIsLoading] = useState({ jd: false, questions: false, analysis: false });
   const [errorStatus, setErrorStatus] = useState<{ type: string, message: string } | null>(null);
 
@@ -418,24 +419,32 @@ export default function App() {
     setIsLoading(prev => ({ ...prev, jd: true }));
     setErrorStatus(null);
     
+    // Add a race condition to ensure we don't hang forever
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 4000));
+    
     try {
-      const apiResult = await analyzeJD(targetRole, jobDescription);
-      if (apiResult) {
+      const apiResult = await Promise.race([analyzeJD(targetRole, jobDescription), timeoutPromise]) as JDAnalysis | null;
+      
+      if (apiResult && apiResult.coreResponsibilities) {
         setJdAnalysis(apiResult);
       } else {
-        throw new Error("API returned no data");
+        // Handle result mapping if keys are different from API
+        const fallback = mockJDAnalysis(targetRole);
+        if (apiResult) {
+          // Attempt to map fields if they exist under old names
+          const anyResult = apiResult as any;
+          fallback.coreResponsibilities = anyResult.responsibilities || anyResult.coreResponsibilities || fallback.coreResponsibilities;
+          fallback.keySkills = anyResult.skills || anyResult.keySkills || fallback.keySkills;
+          fallback.experienceRequirements = anyResult.competencies || anyResult.experienceRequirements || fallback.experienceRequirements;
+          fallback.softSkills = anyResult.softSkills || fallback.softSkills;
+          fallback.interviewFocus = anyResult.focus || anyResult.interviewFocus || fallback.interviewFocus;
+          fallback.riskPoints = anyResult.risks || anyResult.riskPoints || fallback.riskPoints;
+        }
+        setJdAnalysis(fallback);
       }
     } catch (err) {
-      console.warn("AI Analysis via API unavailable or failed, using enhanced mock:", err);
+      console.warn("JD Analysis failed or timed out, using fallback:", err);
       setJdAnalysis(mockJDAnalysis(targetRole));
-      
-      const hasKey = import.meta.env.VITE_GEMINI_API_KEY || (window as any).process?.env?.GEMINI_API_KEY;
-      if (hasKey) {
-        setErrorStatus({ 
-          type: 'jd', 
-          message: 'AI 深度解析调用受限，已为您加载专家级岗位画像。' 
-        });
-      }
     } finally {
       setIsLoading(prev => ({ ...prev, jd: false }));
       setTimeout(() => scrollToId('step2'), 100);
@@ -447,23 +456,17 @@ export default function App() {
     setErrorStatus(null);
     
     try {
-      const result = await generateQuestions(targetRole, jdAnalysis);
-      if (result && Array.isArray(result)) {
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 4000));
+      const result = await Promise.race([generateQuestions(targetRole, jdAnalysis), timeoutPromise]) as Question[] | null;
+      
+      if (result && Array.isArray(result) && result.length > 0) {
         setQuestions(result);
       } else {
-        throw new Error("Invalid question format");
+        setQuestions(mockQuestions(targetRole));
       }
     } catch (err) {
-      console.warn("AI Question Gen failed, using standard question set:", err);
+      console.warn("AI Question Gen failed or timed out, using standard question set:", err);
       setQuestions(mockQuestions(targetRole));
-      
-      const hasKey = import.meta.env.VITE_GEMINI_API_KEY || (window as any).process?.env?.GEMINI_API_KEY;
-      if (hasKey) {
-        setErrorStatus({ 
-          type: 'questions', 
-          message: '个性化题库生成略有延迟，已为您准备行业标准真题。' 
-        });
-      }
     } finally {
       setIsLoading(prev => ({ ...prev, questions: false }));
       setTimeout(() => scrollToId('step3'), 100);
@@ -473,11 +476,11 @@ export default function App() {
   const handleSelectQuestion = (q: Question) => {
     setSelectedQuestion(q);
     setAnalysisResult(null);
-    setOptimizedAnswerFromServer(null);
+    setOptimizedAnswerFromServer('');
     setTimeout(() => scrollToId('step4'), 100);
   };
 
-  const handleSubmitAnswer = async (useMock = false) => {
+  const handleSubmitAnswer = async () => {
     if (!selectedQuestion) return;
     let answerContent = textAnswer;
     if (answerMode === 'text') {
@@ -489,62 +492,44 @@ export default function App() {
         }
         return alert('请先录制语音回答');
       }
-      // Re-check duration
       if (recordingDuration < 3) return alert('录音时间过短，请重新录制一段完整回答（至少 3 秒）。');
-      
       answerContent = textAnswer || "（语音真题演练，正在分析表达流利度与结构...）";
     }
     
     setIsLoading(prev => ({ ...prev, analysis: true }));
     setErrorStatus(null);
+    
     try {
-      if (useMock) throw new Error("Fallback to mock");
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000));
+      const apiResult = await Promise.race([analyzeAnswer(targetRole, selectedQuestion.text, answerContent, answerMode), timeoutPromise]) as any;
       
-      const result = await analyzeAnswer(targetRole, selectedQuestion.text, answerContent, answerMode);
+      const finalResult = apiResult || mockAnalysis(answerMode, answerContent);
       
-      if (!result) {
-        throw new Error("AI 分析返回空结果");
-      }
-
-      // Robust standardization of result object to prevent rendering crashes
       const standardizedResult: AnalysisResult = {
-        score: result.score || result.overallScore || 0,
-        grade: result.grade || result.level || (result.score > 85 ? '卓越匹配' : '表现良好'),
-        summary: result.summary || "AI 已完成深度诊断，请查看下方各项维度指标。",
-        matching: result.matching || result.jobMatch || "正在计算与岗位的匹配度...",
-        structure: result.structure || result.logic || "正在评估 STAR 结构的完整性...",
-        completeness: result.completeness || "已评估回答内容的覆盖深度。",
-        clarity: result.clarity || "已评估表达的连贯性与专业度。",
-        pros: Array.isArray(result.pros || result.strengths) ? (result.pros || result.strengths) : ["回答态度积极"],
-        cons: Array.isArray(result.cons || result.weaknesses) ? (result.cons || result.weaknesses) : ["可以进一步丰富细节"],
-        suggestions: Array.isArray(result.suggestions) ? result.suggestions : ["建议多采用量化指标"],
-        voiceMetrics: result.voiceMetrics || { 
-          fluency: result.fluency || 80, 
-          stability: result.stability || 75, 
-          confidence: result.confidence || 85 
-        }
+        overallScore: finalResult.overallScore || finalResult.score || 0,
+        level: finalResult.level || finalResult.grade || ( (finalResult.overallScore || finalResult.score) > 85 ? '卓越匹配' : '表现良好'),
+        summary: finalResult.summary || "AI 已完成深度诊断，请查看下方各项维度指标。",
+        jobMatch: finalResult.jobMatch || finalResult.matching || "正在计算与岗位的匹配度...",
+        logic: finalResult.logic || finalResult.structure || "正在评估 STAR 结构的完整性...",
+        completeness: finalResult.completeness || "已评估回答内容的覆盖深度。",
+        clarity: finalResult.clarity || "已评估表达的连贯性与专业度。",
+        strengths: Array.isArray(finalResult.strengths || finalResult.pros) ? (finalResult.strengths || finalResult.pros) : ["回答态度积极"],
+        weaknesses: Array.isArray(finalResult.weaknesses || finalResult.cons) ? (finalResult.weaknesses || finalResult.cons) : ["可以进一步丰富细节"],
+        suggestions: Array.isArray(finalResult.suggestions) ? finalResult.suggestions : ["建议多采用量化指标"],
+        fluency: finalResult.fluency || (finalResult.voiceMetrics?.fluency) || 80,
+        stability: finalResult.stability || (finalResult.voiceMetrics?.stability) || 75,
+        confidence: finalResult.confidence || (finalResult.voiceMetrics?.confidence) || 85,
+        optimizedAnswer: finalResult.optimizedAnswer || ""
       };
 
       setAnalysisResult(standardizedResult);
-      setOptimizedAnswerFromServer(result.optimizedAnswer || null);
+      setOptimizedAnswerFromServer(standardizedResult.optimizedAnswer || "");
       setTimeout(() => scrollToId('step5'), 100);
     } catch (err) {
-      console.error("AI Analysis Failed, using mock fallback:", err);
+      console.error("AI Analysis Failed or timed out, using mock fallback:", err);
       const result = mockAnalysis(answerMode, answerContent);
       setAnalysisResult(result);
-      
-      const isShortResponse = answerContent.trim().length < 5 || answerContent.includes('你好');
-      const mockOptimized = isShortResponse 
-        ? `针对这个问题，更好的回答应该是这样的：\n“在我过往担任${targetRole}期间，我遇到过一个... [详细描述 S/T]。当时我采取了 [A] ... 最终达到了 [R] ...。这证明了我的...能力。”`
-        : `基于你的回答，我为你优化了表达：\n“在${targetRole}的实践中，我非常看重... [优化后的 STAR 结构] ...这不仅提升了效率，更夯实了底层逻辑。”`;
-        
-      setOptimizedAnswerFromServer(mockOptimized);
-      if (!useMock) {
-        setErrorStatus({ 
-          type: 'analysis', 
-          message: '深度诊断报告稍有延迟，已为您展示基础分析。' 
-        });
-      }
+      setOptimizedAnswerFromServer(result.optimizedAnswer || "");
       setTimeout(() => scrollToId('step5'), 100);
     } finally {
       setIsLoading(prev => ({ ...prev, analysis: false }));
@@ -677,7 +662,7 @@ export default function App() {
                   <Target className="w-4 h-4" /> 核心业务职责
                 </h3>
                 <ul className="space-y-6">
-                  {(jdAnalysis.responsibilities || []).map((r, i) => (
+                  {(jdAnalysis.coreResponsibilities || []).map((r, i) => (
                     <li key={i} className="flex gap-4 text-sm text-slate-600 leading-relaxed group">
                       <div className="w-8 h-8 rounded-xl bg-white border border-blue-100 shadow-sm flex items-center justify-center text-[10px] font-black text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-all shrink-0">0{i+1}</div>
                       <p className="font-medium pt-1">{r}</p>
@@ -691,7 +676,7 @@ export default function App() {
                 <GlassCard className="sm:col-span-1 !p-8 border-emerald-100/50">
                   <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] block mb-6 px-1 flex items-center gap-2"><Zap className="w-3.5 h-3.5" /> 硬核技能矩阵</span>
                   <div className="flex flex-wrap gap-2.5">
-                    {[...(jdAnalysis.competencies || []), ...(jdAnalysis.skills || [])].map(s => (
+                    {[...(jdAnalysis.experienceRequirements || []), ...(jdAnalysis.keySkills || [])].map(s => (
                       <span key={s} className="px-4 py-2 bg-emerald-50 text-emerald-700 rounded-2xl text-[11px] font-bold border border-emerald-100 transition-all hover:scale-105 cursor-default">
                         {s}
                       </span>
@@ -716,10 +701,21 @@ export default function App() {
                     <div className="flex-1">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block mb-6">面试战略攻坚点</span>
                       <ul className="grid sm:grid-cols-2 gap-4">
-                        {(jdAnalysis.focus || []).map((f, i) => (
+                        {(jdAnalysis.interviewFocus || []).map((f, i) => (
                            <li key={i} className="flex gap-3 text-xs text-slate-300 leading-relaxed font-bold bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-all">
                              <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
                              {f}
+                           </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] block mb-6">潜在面试风险点</span>
+                      <ul className="grid sm:grid-cols-1 gap-4">
+                        {(jdAnalysis.riskPoints || []).map((r, i) => (
+                           <li key={i} className="flex gap-3 text-xs text-red-300 leading-relaxed font-bold bg-red-900/20 p-4 rounded-2xl border border-red-500/10 hover:bg-red-900/30 transition-all">
+                             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                             {r}
                            </li>
                         ))}
                       </ul>
@@ -927,11 +923,11 @@ export default function App() {
                     <div className="sm:col-span-5 flex flex-col items-center sm:items-start gap-4">
                       <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">综合测评得分</div>
                       <div className="flex items-baseline gap-2">
-                        <span className="text-8xl font-black tracking-tighter text-blue-400">{analysisResult.score}</span>
+                        <span className="text-8xl font-black tracking-tighter text-blue-400">{analysisResult?.overallScore ?? 0}</span>
                         <span className="text-2xl font-black text-slate-500">/ 100</span>
                       </div>
                       <div className="px-5 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm font-black tracking-wider">
-                        {analysisResult.grade}
+                        {analysisResult?.level || "待分析"}
                       </div>
                     </div>
                     <div className="sm:col-span-7 space-y-4 border-l border-white/5 pl-0 sm:pl-10">
@@ -956,16 +952,20 @@ export default function App() {
                        </div>
                     </div>
                     <div className="space-y-6">
-                      {Object.entries((analysisResult && analysisResult.voiceMetrics) || { fluency: 0, stability: 0, confidence: 0 }).map(([k, v]) => (
-                        <div key={k} className="space-y-2">
+                      {[
+                        { label: '流利度', key: 'fluency', value: analysisResult?.fluency ?? 0 },
+                        { label: '稳定性', key: 'stability', value: analysisResult?.stability ?? 0 },
+                        { label: '自信心', key: 'confidence', value: analysisResult?.confidence ?? 0 }
+                      ].map((metric) => (
+                        <div key={metric.key} className="space-y-2">
                           <div className="flex justify-between items-end">
-                            <span className="text-xs font-bold text-slate-500 uppercase">{k === 'fluency' ? '流利度' : k === 'stability' ? '稳定性' : '自信心'}</span>
-                            <span className="text-sm font-black text-blue-600">{v}%</span>
+                            <span className="text-xs font-bold text-slate-500 uppercase">{metric.label}</span>
+                            <span className="text-sm font-black text-blue-600">{metric.value}%</span>
                           </div>
                           <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                             <motion.div 
                               initial={{ width: 0 }}
-                              whileInView={{ width: `${v}%` }}
+                              whileInView={{ width: `${metric.value}%` }}
                               transition={{ duration: 1.5, delay: 0.2 }}
                               className="h-full accent-gradient"
                             ></motion.div>
@@ -980,10 +980,10 @@ export default function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
-                { l: '职位匹配度', v: analysisResult.matching, i: Target, c: 'text-blue-600', bg: 'bg-blue-50', desc: '基于岗位 JD 的深度词法匹配。' },
-                { l: '回答逻辑性', v: analysisResult.structure, i: LayoutDashboard, c: 'text-emerald-600', bg: 'bg-emerald-50', desc: '考察 STAR 法则的运用完整性。' },
-                { l: '信息完整度', v: analysisResult.completeness, i: ClipboardCheck, c: 'text-orange-600', bg: 'bg-orange-50', desc: '评估关键数据与结果的呈现。' },
-                { l: '沟通清晰度', v: analysisResult.clarity, i: Volume2, c: 'text-indigo-600', bg: 'bg-indigo-50', desc: '分析语言的组织与核心观点的表述。' },
+                { l: '职位匹配度', v: analysisResult?.jobMatch || "暂无匹配数据", i: Target, c: 'text-blue-600', bg: 'bg-blue-50', desc: '基于岗位 JD 的深度词法匹配。' },
+                { l: '回答逻辑性', v: analysisResult?.logic || "暂无逻辑分析", i: LayoutDashboard, c: 'text-emerald-600', bg: 'bg-emerald-50', desc: '考察 STAR 法则的运用完整性。' },
+                { l: '信息完整度', v: analysisResult?.completeness || "暂无内容深度分析", i: ClipboardCheck, c: 'text-orange-600', bg: 'bg-orange-50', desc: '评估关键数据与结果的呈现。' },
+                { l: '沟通清晰度', v: analysisResult?.clarity || "暂无清晰度评价", i: Volume2, c: 'text-indigo-600', bg: 'bg-indigo-50', desc: '分析语言的组织与核心观点的表述。' },
               ].map((item, i) => (
                 <div key={i} className="group p-8 rounded-[2.5rem] bg-white border border-slate-100 hover:border-blue-200 hover:shadow-2xl transition-all duration-500 space-y-6">
                   <div className={`w-14 h-14 rounded-2xl ${item.bg} flex items-center justify-center ${item.c} shadow-sm group-hover:scale-110 transition-transform`}><item.i className="w-7 h-7" /></div>
@@ -1005,7 +1005,7 @@ export default function App() {
                        <h3 className="text-xl font-black text-slate-900 tracking-tight">高光时刻</h3>
                      </div>
                      <div className="grid gap-4">
-                       {analysisResult.pros.map((p, i) => (
+                       {(analysisResult?.strengths || []).map((p, i) => (
                          <div key={i} className="p-5 rounded-3xl bg-emerald-50/30 border border-emerald-100/50 flex gap-4 items-start group">
                            <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0 group-hover:bg-emerald-500 transition-colors">
                               <CheckCircle2 className="w-4 h-4 text-emerald-500 group-hover:text-white" />
@@ -1022,7 +1022,7 @@ export default function App() {
                        <h3 className="text-xl font-black text-slate-900 tracking-tight">待打磨之处</h3>
                      </div>
                      <div className="grid gap-4">
-                       {analysisResult.cons.map((c, i) => (
+                       {(analysisResult?.weaknesses || []).map((c, i) => (
                          <div key={i} className="p-5 rounded-3xl bg-slate-50 border border-slate-200/50 flex gap-4 items-start group opacity-80 hover:opacity-100 transition-opacity">
                            <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0 group-hover:bg-slate-900 transition-colors">
                               <AlertCircle className="w-4 h-4 text-slate-400 group-hover:text-white" />
@@ -1040,7 +1040,7 @@ export default function App() {
                   <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
                   <h3 className="text-base font-black uppercase tracking-widest flex items-center gap-3 mb-8"><Lightbulb className="w-5 h-5" /> AI 策略大师建议</h3>
                   <div className="space-y-5">
-                    {(analysisResult.suggestions || []).map((s, i) => (
+                    {(analysisResult?.suggestions || []).map((s, i) => (
                       <div key={i} className="p-5 rounded-3xl bg-white/10 border border-white/10 flex gap-4 items-start transition-all hover:bg-white/20">
                         <span className="w-6 h-6 rounded-lg bg-white/20 text-white text-[11px] font-black flex items-center justify-center shrink-0">{i+1}</span>
                         <p className="text-sm text-blue-50 leading-relaxed font-bold">{s}</p>

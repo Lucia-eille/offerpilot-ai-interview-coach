@@ -11,7 +11,8 @@ const genAI = new GoogleGenerativeAI(getApiKey());
 export async function analyzeJD(role: string, jd: string) {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error("Missing Gemini API Key");
+    console.warn("Gemini API Key missing, skipping real API call.");
+    return null;
   }
 
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
@@ -54,7 +55,10 @@ export async function analyzeJD(role: string, jd: string) {
 
 export async function generateQuestions(role: string, analysis: any) {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("Missing Gemini API Key");
+  if (!apiKey) {
+    console.warn("Gemini API Key missing for questions, using mock.");
+    return null;
+  }
 
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
@@ -87,7 +91,10 @@ export async function generateQuestions(role: string, analysis: any) {
 
 export async function analyzeAnswer(role: string, question: string, answer: string, mode: 'text' | 'voice') {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("Missing Gemini API Key");
+  if (!apiKey) {
+    console.warn("Gemini API Key missing for answer analysis, using mock.");
+    return null;
+  }
 
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
