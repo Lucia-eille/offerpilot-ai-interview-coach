@@ -1,0 +1,8 @@
+{
+  "name": "OfferPilot",
+  "description": "AI-powered interview coaching platform tailored to your target role and job description.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
