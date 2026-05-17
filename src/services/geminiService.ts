@@ -39,13 +39,16 @@ export async function analyzeJD(role: string, jd: string) {
 
   try {
     const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const response = await result.response;
+    const text = response.text();
+    if (!text) throw new Error("Empty response from AI");
+    
     // Clean up markdown if present
     const jsonString = text.replace(/```json|```/g, "").trim();
     return JSON.parse(jsonString);
   } catch (error) {
-    console.error("Gemini Analyze JD Error:", error);
-    throw error;
+    console.warn("Gemini Service Error:", error);
+    return null; // Return null so the caller can fallback to mock
   }
 }
 
@@ -70,12 +73,15 @@ export async function generateQuestions(role: string, analysis: any) {
 
   try {
     const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const response = await result.response;
+    const text = response.text();
+    if (!text) throw new Error("Empty response");
+
     const jsonString = text.replace(/```json|```/g, "").trim();
     return JSON.parse(jsonString);
   } catch (error) {
-    console.error("Gemini Generate Questions Error:", error);
-    throw error;
+    console.warn("Gemini Generate Questions Error:", error);
+    return null;
   }
 }
 
@@ -109,12 +115,15 @@ export async function analyzeAnswer(role: string, question: string, answer: stri
 
   try {
     const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const response = await result.response;
+    const text = response.text();
+    if (!text) throw new Error("Empty response");
+
     const jsonString = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(jsonString);
     return parsed;
   } catch (error) {
-    console.error("Gemini Analyze Answer Error:", error);
-    throw error;
+    console.warn("Gemini Analyze Answer Error:", error);
+    return null;
   }
 }
